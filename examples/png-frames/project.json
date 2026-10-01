@@ -1,0 +1,11 @@
+{
+  "frames": "frames",
+  "work": "work",
+  "export_to": "out",
+  "scale": 5,
+  "bg": "808080",
+  "refs": ["../palette"],
+  "prompt_file": "prompt.txt",
+  "engine": "chat",
+  "mask_grow": 2
+}

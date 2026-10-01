@@ -167,7 +167,8 @@ def finish_frame(name, f, group):
     d = root + 'f%03d/' % f
     refs = []
     for r in P.get('refs', []):
-        refs += ['--ref', W(P.work + r)]
+        if os.path.exists(P.work + r):           # an optional palette folder may be absent
+            refs += ['--ref', W(P.work + r)]
     pxf('downscale', W(d + 'out.png'), W(d + 'down'), '--manifest', W(d + 'in.json'),
         *refs, '--ref', W(d + 'crop'), '--bg', P.get('bg', '808080'),
         *P.get('downscale_flags', DOWNSCALE), '--confidence', W(d + 'conf'), '--report', W(d + 'rep.json'))

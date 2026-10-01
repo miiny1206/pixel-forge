@@ -1,4 +1,4 @@
-"""Every finished frame -> one directory -> the game, in one step.
+"""Every finished frame -> one directory -> the output (PNGs or a game file), in one step.
 
     python -m pxf_pipeline.finish [run ...]
 
@@ -14,7 +14,8 @@
    finish.always_ship are copied from stock on purpose.
 5. finish.post steps run on bake_all, in order (character-specific fixes).
 6. hold.py, when the project has a "hold" table.
-7. finish.bake: the command that writes the game files; "{bake_all}" is replaced.
+7. finish.bake: the command that writes the result; "{bake_all}" is replaced. Without one,
+   a project prepared from PNG frames is exported back to PNGs (export.py).
 
 Project:
 
@@ -96,6 +97,8 @@ def main():
     print('%d finished frame(s) gathered, %d identical to stock left out' % (n, same))
     if cfg.get('bake'):
         step(P, cfg['bake'], out)
+    elif P.get('frames'):
+        module(P, 'export')
 
 
 if __name__ == '__main__':

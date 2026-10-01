@@ -11,8 +11,10 @@ Keys used by the core pipeline (all optional unless noted):
 
     work            working directory (default "work"); holds all/, anim.json, crops.json,
                     runs/, bake_all/ ...
-    source_archive      the game archive the sheet is imported from (prepare)
-    sheet, ani, per sheet and .ani member names, steps per animation in the .ani
+    frames          a folder of PNG frames to redraw (one subfolder per animation) -- or:
+    source_archive  a game archive the sheet is imported from (prepare)
+    sheet, ani, per sheet and animation member names, steps per animation (archive input)
+    export_to       where export writes the finished PNGs (default <work>/out)
     scale, gap, bg, canvas   how one frame is laid out for the model (5, 8, "808080", 1024)
     refs            extra palette references for `pxf downscale`, relative to work
     downscale_flags extra flags for `pxf downscale`

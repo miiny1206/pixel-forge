@@ -1,0 +1,4 @@
+This is a pixel art sprite: one character in one pose on a flat #808080 grey background.
+Change only the clothing to <describe the new outfit>.
+Keep everything else exactly: the same single figure, the same pose, the same size and the same position on the canvas, the face, the hair and anything held in the hands.
+Crisp pixel art with hard pixel edges, no anti-aliasing and no blur. The background stays flat #808080. Output only the edited image.

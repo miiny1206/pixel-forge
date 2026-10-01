@@ -1,35 +1,46 @@
 # pixel-forge
 
-Redraw a game's sprite sheet with an image model — a new costume on every frame of a
-character — and get back art the game accepts: on the original pixel grid, in the
-original palette, on the original canvases, with the original animation offsets.
+**AI pixel art that stays pixel art — and stays consistent from frame to frame.**
+
+Image models can restyle a sprite, but what comes back is not usable as-is: it is off the
+pixel grid, full of near-duplicate colours, slightly rescaled, and every frame of an
+animation is drawn a little differently, so the result shimmers and jitters when it plays.
+pixel-forge wraps an image model in deterministic tools that fix exactly those things:
+
+- **on the grid** — the model's output is voted back onto the sprite's own pixel grid,
+  block by block, at a scale the tool chose (it never has to guess it);
+- **in the palette** — every pixel snaps to the original palette plus colours you allow;
+- **in place** — the edit is kept inside the original silhouette and canvas, so frames do
+  not drift or jitter;
+- **consistent across frames** — each animation is rebuilt as *one drawing*: wherever the
+  original frames did not change, the new pixels are carried over from the previous
+  finished frame instead of being redrawn, so only real motion changes.
+
+Use it to put a new outfit on a character, recolour or restyle a sprite set, or redraw
+details across a whole animation — with any OpenAI-compatible image endpoint.
+
+![original frames (top) and redrawn frames (bottom): same grid, palette, canvases and poses](docs/compare.png)
+
+*Top: original frames. Bottom: the same frames after the pipeline — a new outfit drawn by an
+image model, one frame per request, snapped back onto the original grid and palette.*
 
 ```
-game archive ──pxf import──▶ frames (PNG) ──crop──▶ image model, one frame at a time
-                                                         │
-game archive ◀──bake── finished frames ◀──project fixes◀─┴─ pxf downscale / remix
+your frames (PNG) ──crop + zoom──▶ image model, one frame at a time
+                                          │
+finished frames ◀── smooth ◀── fixes ◀────┴── grid vote + palette snap + silhouette mask
 ```
 
-The AI only proposes pixels. Everything that decides what reaches the game is
-deterministic and measured: a block vote onto the known grid, a palette snap, a mask
-that keeps the edit inside the character's stock silhouette, and checks that refuse
-anything that would move a frame on screen.
+The AI only proposes pixels. Everything that decides what you get back is deterministic
+and measured.
 
-![stock frames (top) and the redrawn costume (bottom), same pixel grid, palette and canvases](docs/compare.png)
-
-*Top: the original frames. Bottom: the same frames after the pipeline — a new costume drawn
-by an image model, snapped back onto the original grid, palette and canvas.*
-
-It ships a reader/writer for one game's native sheet, animation and archive files, but the
-grid/palette tools (`pxf sheet`, `downscale`, `conform`, `snap`, `remix`, `recolor`) work on
-any PNG frames. **No game files are included** — bring your own.
-
-- `crates/` — the `pxf` CLI (Rust): formats, sheets, downscale, masks, Aseprite-friendly
-  import/export.
-- `python/pxf_pipeline/` — the redraw pipeline around `pxf`: model backend, batch runner,
-  smoothing, finishing, QA sheets.
-- `examples/beach-costume/` — the full case study: one character, 379 frames, a beach
-  costume, every character-specific fix that was needed.
+- `crates/` — the `pxf` CLI (Rust): zoomed sheets with a recorded grid, grid-vote
+  downscale, palette conform, masks, remix, recolour, Aseprite-friendly import/export.
+- `python/pxf_pipeline/` — the pipeline around `pxf`: model backend, batch runner,
+  per-animation smoothing, refused-frame handling, QA sheets, export.
+- `examples/png-frames/` — the minimal project: a folder of PNG animations in, the same
+  layout out.
+- `examples/beach-costume/` — a full case study (379 frames, 50 animations) with every
+  character-specific fix it needed, baked into a game's own sprite format.
 
 ---
 
@@ -41,7 +52,7 @@ any PNG frames. **No game files are included** — bring your own.
 4. [Workflow](#workflow)
 5. [The pipeline, step by step](#the-pipeline-step-by-step)
 6. [`pxf` command reference](#pxf-command-reference)
-7. [Native formats](#native-formats)
+7. [Game formats (optional)](#game-formats-optional)
 8. [Case study: a beach costume](#case-study-a-beach-costume)
 9. [Refusals and moderation](#refusals-and-moderation)
 10. [LoRA / fine-tuning](#lora--fine-tuning)
@@ -57,7 +68,7 @@ keep the pose. Measured on the same character frames:
 
 | | grid fit ¹ | notes |
 |---|---|---|
-| stock art | 100% | every edge on one grid phase |
+| original art | 100% | every edge on one grid phase |
 | Qwen-Image-Edit (diffusion, whole sheet) | **32–37%** (chance) | edges spread evenly over all phases; lost shoulder armour, tassel, face detail; a different best offset per frame (+1,-1 / +3,-3 / +1,-1 / +4,0) — non-rigid drift, cannot be realigned |
 | SDXL inpainting (masked) | — | seam better, the fill itself "smooth mush" with no pixel structure |
 | GPT image-edit model, 4–6 frames per sheet | **76–87%** | keeps the grid but rescales it uniformly (always answered 1254×1254) |
@@ -75,11 +86,14 @@ Other measured facts that shaped the design:
   (73×98 → 100×149). `pxf sheet` writes the grid, so `pxf downscale` *knows* it.
 - Colour-derived clothing masks oscillate (the artist reuses the same darks for outline,
   stockings, skirt shadow and skin shadow); four attempts, four failure modes.
-- A frame's position on screen is not in the image; it is in the animation file. A silhouette that
-  moves one pixel makes the animation jitter in game.
+- Redrawing each frame independently made consecutive idle frames differ by 28–44% where
+  the originals differ by 7–15% (breathing): the character shimmered. Consistency has to be
+  enforced across the animation, not hoped for per frame.
+- A frame's position on screen is set by its anchor, not by the image. A silhouette that
+  moves one pixel makes the animation jitter.
 
-So the model is used for what it is good at — drawing the new costume — and everything
-else is done by tools whose output can be checked.
+So the model is used for what it is good at — drawing the change — and everything else is
+done by tools whose output can be checked.
 
 ---
 
@@ -100,6 +114,9 @@ at a pinned commit (Cargo fetches it).
 pip install -e python/         # or: export PYTHONPATH=$PWD/python
 python3 tests/smoke_test.py    # synthetic data only; also exercises pxf if it is built
 ```
+
+No game files and no Rust-side format work are needed for PNG projects; `pxf` is still
+required (it does the sheet/downscale/remix steps).
 
 **Optional:** [Aseprite](https://www.aseprite.org/) for hand edits
 (`python -m pxf_pipeline asebridge`).
@@ -130,24 +147,25 @@ image-edit model handles a multi-frame sheet and an optional reference image; a 
 model does best with **one frame, no reference** — given several frames or a reference it
 redrew the layout or copied the reference outright.
 
-### `project.json` — one character's job
+### `project.json` — one job
 
-Paths are relative to the project file. The full example is
-[`examples/beach-costume/project.json`](examples/beach-costume/project.json).
+Paths are relative to the project file. Minimal: [`examples/png-frames/project.json`](examples/png-frames/project.json);
+full: [`examples/beach-costume/project.json`](examples/beach-costume/project.json).
 
 | key | meaning |
 |---|---|
 | `work` | working directory (default `work`) |
-| `source_archive` | the game archive to import from — keep a pristine copy |
-| `target_archive` | the archive the bake writes into (example bake step) |
-| `sheet`, `ani`, `per` | sheet and animation member names; steps per animation (50 for character sheets) |
+| `frames` | **input**: a folder of PNG frames, one subfolder per animation (files in name order) |
+| `export_to` | where `finish` / `export` writes the finished PNGs (default `work/out`) |
+| `source_archive`, `sheet`, `ani`, `per` | alternative input: a game archive and the sheet / animation members in it (see [Game formats](#game-formats-optional)) |
+| `target_archive` | the archive a custom bake step writes into |
 | `scale`, `gap`, `bg`, `canvas` | how a frame is laid out for the model (5, 8, `808080`, 1024) |
 | `refs` | extra palette references for `pxf downscale`, relative to `work` |
 | `downscale_flags` | flags for `pxf downscale` (default `--tol 24 --resolve --grain --register --metric redmean`) |
 | `prompt_file` | the edit prompt |
 | `engine` | `chat` or `images` |
-| `leftover_max`, `tries` | resend a frame whose old outfit survived above this % (default 28, 3 tries) |
-| `mask_grow` | px the figure mask may grow over the stock drawing |
+| `leftover_max`, `tries` | resend a frame whose original look survived above this % (default 28, 3 tries) |
+| `mask_grow` | px the figure mask may grow over the original drawing |
 | `hooks.crops` | `file.py:func(project) -> {frame: [x,y,w,h]}` — what to crop (default: opaque bbox) |
 | `hooks.masks` | `file.py:func(outdir, frames, grow)` — the figure mask (default: every opaque pixel) |
 | `hooks.after_remix` | list of `file.py:func(path, frame, run_dir)` run on each finished frame |
@@ -161,14 +179,14 @@ The project is found from `--project FILE`, else `PXF_PROJECT`, else `./project.
 ## Workflow
 
 ```sh
-export PXF_PROJECT=examples/beach-costume/project.json
+export PXF_PROJECT=examples/png-frames/project.json
 
 python -m pxf_pipeline prepare                 # work/all, work/anim.json, work/crops.json
 python -m pxf_pipeline batch run idle anim:0   # one animation first; look at it
-python -m pxf_pipeline review 0                # work/review/anim_00.png: stock vs result
+python -m pxf_pipeline review 0                # work/review/anim_00.png: original vs result
 python -m pxf_pipeline batch run rest all      # everything else (resumable; rerun to continue)
 python -m pxf_pipeline batch status rest
-python -m pxf_pipeline finish                  # smooth, gather, project fixes, bake
+python -m pxf_pipeline finish                  # smooth, gather, project fixes, export PNGs
 ```
 
 Long runs across rate limits: `python -m pxf_pipeline autorun rest` (polls every 30 min,
@@ -186,23 +204,24 @@ paint, then `python -m pxf_pipeline finish x` pulls `runs/x/aseprite/x.aseprite`
 ## The pipeline, step by step
 
 ### 1. prepare
-`pxf import <source_archive> --only <sheet>` → `work/all/frame_NNN.png` (+ `manifest.json` with
-each frame's animation anchors), `pxf ani --only <ani> --json` → `work/anim.json`, and the crop
-boxes → `work/crops.json`.
+From a PNG folder (`frames`): every frame → `work/all/frame_NNN.png`, one animation per
+subfolder → `work/anim.json` (frames anchored at their bottom centre), original names →
+`work/frames.json`. From a game archive: `pxf import` + `pxf ani` instead. Either way the
+crop boxes → `work/crops.json`.
 
 ### 2. batch (per frame)
-1. **crop** the stock frame to its box; **`pxf sheet`** lays it out at `scale` on a flat
+1. **crop** the original frame to its box; **`pxf sheet`** lays it out at `scale` on a flat
    `bg` canvas (scale 5 measured best: at 3/4/5 a sheet gave 1286–1999 / 954–1126 / 305–653
    weak px per frame).
 2. **model edit** through `backend.py` (`chat` or `images`).
 3. **`pxf downscale`** back onto the grid: every source pixel is a weighted vote over its
    whole block; `--register` fits the model's 1–3% scale drift; `--resolve` re-decides weak
-   pixels no neighbour agrees with (orphans 264–312 → 123–148, stock art has 117–191);
-   `--grain` folds two-shade grain (near-shade orphans 40% → 26%, stock 8%);
+   pixels no neighbour agrees with (orphans 264–312 → 123–148, original art has 117–191);
+   `--grain` folds two-shade grain (near-shade orphans 40% → 26%, original 8%);
    `--metric redmean` keeps skin from snapping to gold trim.
 4. **place** the crop back into the full frame, build the **figure mask**, and
-   **`pxf remix --alpha`**: inside the stock figure the edit wins (transparency too — a
-   skirt can go); outside, the stock art stays. The silhouette can only shrink, never grow,
+   **`pxf remix --alpha`**: inside the original figure the edit wins (transparency too — a
+   skirt can go); outside, the original art stays. The silhouette can only shrink, never grow,
    so the animation offsets stay valid.
 5. **`after_remix` hooks** (project-specific fixes).
 6. **twins**: frames the game ships twice (same drawing, colours one RGB565 step off) get the
@@ -214,34 +233,35 @@ sent again (up to `tries`) and the best try is kept. State lives in
 
 ### 3. smooth
 Each animation becomes **one drawing**. Per-frame redraws made consecutive idle frames
-differ by 28–44% where the stock differs by 7–15% (breathing): the character shimmered.
+differ by 28–44% where the original differs by 7–15% (breathing): the character shimmered.
 Walking each animation from a key frame (the medoid), a pixel is carried over from the
-previous finished frame wherever the **stock** art did not change there (after the best
+previous finished frame wherever the **original** art did not change there (after the best
 1–3 px shift) and the model's own pixel agrees; only where the artist really redrew is the
 model's drawing used.
 
 ### 4. transplant / graft
 Fill a frame from a finished frame of nearly the same pose — no request. `transplant`
-takes the donor's pixel where the two stock frames agree after alignment and reports the
+takes the donor's pixel where the two original frames agree after alignment and reports the
 rest. (The example's `graft.py` adds stamping a whole figure.)
 
 ### 5. review / leftover
-`review <anims>` writes stock-above-result sheets for QA; `leftover` prints the old-outfit
+`review <anims>` writes original-above-result sheets for QA; `leftover` prints the old-outfit
 score per frame.
 
 ### 6. finish
 Pulls Aseprite edits back, rebuilds `smooth`, runs `finish.after_smooth` steps, gathers
 every run into `work/bake_all` (later runs win, `runs/graft` over them, `runs/smooth` over
-all; frames still identical to stock are left out so the bake can rule-paint them), copies
+all; frames still identical to the original are left out so the bake can rule-paint them), copies
 `keep_stock` / `always_ship` frames, runs `finish.post` steps in order, `hold`, and finally
 `finish.bake`. Each step is `[script.py, args...]` relative to the project, run with
-`PXF_PROJECT` set; `{bake_all}` and `{work}` are substituted.
+`PXF_PROJECT` set; `{bake_all}` and `{work}` are substituted. Without a `bake` step, a PNG
+project is exported: every frame back under its original name, redrawn or unchanged.
 
 ### 7. hold and grow
 `hold` shows a finished neighbour in place of a frame no model would draw, placed by the
 animation offsets so it stands where that frame stands. If the neighbour does not fit the
-stock canvas, `grow` pads that frame's canvas in **every** sheet sharing the animation file
-and moves its steps by the padding (`x += left, z += top, y += right`) — the stock art stays on the same
+original canvas, `grow` pads that frame's canvas in **every** sheet sharing the animation file
+and moves its steps by the padding (`x += left, z += top, y += right`) — the original art stays on the same
 screen pixels (checked pixel by pixel in `tests/smoke_test.py`).
 
 ---
@@ -302,10 +322,10 @@ files byte-identical**, 0 differing; import → PNG → export byte-identical; d
 
 ---
 
-## Native formats
+## Game formats (optional)
 
-The game-specific readers and writers live in `crates/sprite-formats` (Rust) and
-`python/pxf_pipeline/sheetio.py` (Python). In short: a sheet is a list of RGB565 frames with
+PNG folders need none of this. For writing straight into a game, the readers and writers
+live in `crates/sprite-formats` (Rust) and `python/pxf_pipeline/sheetio.py` (Python). In short: a sheet is a list of RGB565 frames with
 a colour key instead of alpha and a sealed header; an animation file holds, per animation
 step, a frame index and its offset from the character's anchor (and the mirrored offset);
 an archive is a plain zip. To use the pipeline with another game, replace these two modules —
@@ -332,7 +352,7 @@ character lives there, wired in through `project.json`:
 | `graft.py` | frames the model refused, filled from a redrawn frame of the same pose |
 | `beachfx.py`, `foam.py` | effect colours in her sheet turned sea-blue, with foam |
 | `swordfix.py` | models drew the sheathed sword as a glinting chain while she runs |
-| `trailfix.py` | a stocking-coloured leg-swing trail in the get-up kept from the stock art |
+| `trailfix.py` | a stocking-coloured leg-swing trail in the get-up kept from the original art |
 | `gauntlet.py` | one bracer through the dash instead of eight different drawings |
 | `bkbake.py` + `bkpaint.py` | bake into a new sheet in the archive; frames no model drew get a rule-painted bikini |
 
@@ -350,7 +370,7 @@ output stage). The pipeline's policy is fixed:
 
 - a refused frame is recorded as `refused` and is **never resent** — not with other wording,
   not with another crop, not through another engine to get around the refusal;
-- it keeps the project's fallback (stock art or a rule-painted version) until a person
+- it keeps the project's fallback (original art or a rule-painted version) until a person
   decides; `transplant`, `graft` and `hold` fill it **from frames that did come back**,
   without any request.
 
@@ -371,9 +391,12 @@ downloading weights — so it is future work, not part of this pipeline.
 
 ## Limitations
 
-- The native readers target one game's formats; other games need their own import/export
-  (the PNG-level tools still apply).
-- Masks and crops are the hard, character-specific part. The defaults (every opaque pixel,
+- The edit stays inside the original silhouette (plus `mask_grow`): changing or removing
+  things works, making the figure bigger needs a custom mask hook.
+- New colours must be allowed explicitly (palette references); the snap never invents one.
+- Built-in game-format support covers one game; for other engines use PNG folders or add
+  a reader/writer.
+- Masks and crops are the hard, subject-specific part. The defaults (every opaque pixel,
   opaque bounding box) are a starting point; a real costume change needs a figure finder
   like the example's.
 - One request per frame costs time (≈20–60 s each) and quota; `autorun` waits out rate

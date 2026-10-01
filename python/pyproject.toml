@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pxf-pipeline"
 version = "0.1.0"
-description = "AI redraw pipeline for game sprite sheets, built around the pxf CLI"
+description = "AI pixel-art redraw pipeline: on-grid, on-palette and frame-consistent sprite animations, built around the pxf CLI"
 license = {text = "MIT"}
 requires-python = ">=3.9"
 dependencies = ["Pillow>=9"]

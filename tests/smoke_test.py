@@ -103,6 +103,41 @@ def main():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def png_frames():
+    """PNG-folder project: prepare -> (a fake finished frame) -> export, no model, no pxf"""
+    import json, subprocess
+    from PIL import Image
+    d = tempfile.mkdtemp(prefix='pxf_frames_', dir=os.environ.get('PXF_TMP') or None)
+    try:
+        for anim, sizes in (('idle', [(8, 10), (8, 11)]), ('run', [(12, 9), (10, 9), (11, 9)])):
+            os.makedirs(os.path.join(d, 'frames', anim))
+            for i, (w, h) in enumerate(sizes):
+                im = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+                im.paste((200, 40, 40, 255), (1, 1, w - 1, h))
+                im.save(os.path.join(d, 'frames', anim, '%02d.png' % i))
+        json.dump({'frames': 'frames'}, open(os.path.join(d, 'project.json'), 'w'))
+        env = dict(os.environ, PXF_PROJECT=os.path.join(d, 'project.json'),
+                   PYTHONPATH=os.path.join(ROOT, 'python'))
+        run = lambda *a: subprocess.run([sys.executable, '-m', 'pxf_pipeline'] + list(a),
+                                        check=True, env=env, stdout=subprocess.DEVNULL)
+        run('prepare')
+        anim = json.load(open(os.path.join(d, 'work', 'anim.json')))
+        assert [len(a['steps']) for a in anim['anims']] == [2, 3], anim
+        s0 = anim['anims'][1]['steps'][0]
+        assert (s0['x'], s0['y'], s0['z']) == (6, 6, 9), s0       # bottom-centre anchor
+        assert len(json.load(open(os.path.join(d, 'work', 'crops.json')))) == 5
+        os.makedirs(os.path.join(d, 'work', 'bake_all'))
+        Image.new('RGBA', (12, 9), (10, 200, 10, 255)).save(os.path.join(d, 'work', 'bake_all', 'frame_002.png'))
+        run('export')
+        out = os.path.join(d, 'work', 'out')
+        assert Image.open(os.path.join(out, 'run', '00.png')).getpixel((0, 0)) == (10, 200, 10, 255)
+        assert Image.open(os.path.join(out, 'idle', '01.png')).size == (8, 11)
+        print('png frames: prepare -> export ok')
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 if __name__ == '__main__':
     main()
+    png_frames()
     print('smoke test passed')

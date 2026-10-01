@@ -1,7 +1,7 @@
 """python -m pxf_pipeline <command> [args] [--project project.json]
 
 commands:
-  prepare                         import the sheet, its .ani and the crop boxes into <work>
+  prepare                         frames (PNG folder or game archive) + animations + crops into <work>
   plan [--scale N]                group frames into sheets (sheet-based engines)
   batch run|redo|requeue|status   send frames to the model and bring them back
   autorun <name>                  batch + finish across rate-limit windows
@@ -11,14 +11,15 @@ commands:
   review <anims> [--zoom N]       stock-vs-result QA sheets
   leftover <dir> <frames>         how much of the stock outfit survived
   crops crops|place|masks ...     the crop / place / mask steps alone
-  finish [aseprite runs]          gather, project post steps, bake
+  finish [aseprite runs]          gather, project post steps, bake or export
+  export [outdir]                 finished frames back to PNGs under their original names
   backend chat|images ...         one image edit
   asebridge to|from ...           Aseprite round trip
 """
 import importlib, sys
 
 COMMANDS = ['prepare', 'plan', 'batch', 'autorun', 'smooth', 'transplant', 'hold', 'review',
-            'leftover', 'crops', 'finish', 'backend', 'asebridge']
+            'leftover', 'crops', 'finish', 'export', 'backend', 'asebridge']
 
 
 def main():
