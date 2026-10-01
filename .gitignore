@@ -1,0 +1,21 @@
+# build
+/target/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# secrets
+.env
+
+# game data and everything derived from it: never commit
+*.spr
+*.ark
+*.ani
+*.col
+*.ark.*
+work/
+runs/
+bake_all/
+game/
+examples/*/work/
+examples/*/game/

@@ -1,0 +1,102 @@
+{
+  "work": "work",
+  "source_archive": "game/pristine/char.ark",
+  "target_archive": "game/char.ark",
+  "sheet": "char_form.spr",
+  "ani": "char_form.ani",
+  "per": 50,
+  "scale": 5,
+  "gap": 8,
+  "bg": "808080",
+  "canvas": 1024,
+  "refs": [
+    "src",
+    "skin_ref.png"
+  ],
+  "downscale_flags": [
+    "--tol",
+    "24",
+    "--resolve",
+    "--grain",
+    "--register",
+    "--metric",
+    "redmean"
+  ],
+  "prompt_file": "prompt.txt",
+  "engine": "chat",
+  "leftover_max": 28,
+  "tries": 3,
+  "mask_grow": 4,
+  "hooks": {
+    "crops": "bodymask.py:crops",
+    "masks": "hooks.py:masks",
+    "after_remix": [
+      "hooks.py:keep_effects",
+      "hooks.py:boss_backfill",
+      "hooks.py:no_sash"
+    ]
+  },
+  "finish": {
+    "after_smooth": [
+      [
+        "bounce.py",
+        "0"
+      ],
+      [
+        "cleanup.py"
+      ]
+    ],
+    "keep_stock": "keep_stock.json",
+    "always_ship": [
+      189
+    ],
+    "post": [
+      [
+        "beachfx.py"
+      ],
+      [
+        "swordfix.py"
+      ],
+      [
+        "trailfix.py"
+      ],
+      [
+        "gauntlet.py"
+      ]
+    ],
+    "bake": [
+      "bkbake.py",
+      "--frames",
+      "{bake_all}"
+    ]
+  },
+  "hold": {
+    "221": 223,
+    "222": 223
+  },
+  "grow": {
+    "221": [
+      9,
+      1,
+      25,
+      2
+    ],
+    "222": [
+      3,
+      10,
+      0,
+      0
+    ]
+  },
+  "bake": {
+    "name": "char_form_beach.spr",
+    "shared": [
+      "char_form_alt.spr"
+    ],
+    "town": {
+      "archive": "game/char_town.ark",
+      "src": "char_form_town.spr",
+      "name": "char_form_beach_town.spr"
+    }
+  }
+}
