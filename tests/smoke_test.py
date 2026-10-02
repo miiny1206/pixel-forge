@@ -190,6 +190,22 @@ def forge():
         g = Image.open(os.path.join(fd, 'anim@2x.gif'))
         assert g.n_frames == 2 and g.size == (32, 32)
         assert Image.open(os.path.join(fd, 'anim.webp')).n_frames == 2
+        # a 2x2 set: one sprite pokes over its cell line and must stay whole in its own cell
+        set_ = Image.new('RGBA', (40, 40), (0, 0, 0, 0))
+        set_.paste((200, 30, 30, 255), (4, 4, 12, 12))
+        set_.paste((30, 200, 30, 255), (18, 4, 30, 14))       # crosses x = 20, centre at 24
+        set_.paste((30, 30, 200, 255), (6, 26, 14, 34))
+        cells = F.split_cells(set_, 2, 2)
+        assert [F.colours_of(c) for c in cells] == [[(200, 30, 30)], [(30, 200, 30)], [(30, 30, 200)], []]
+        assert F.trim(cells[1]).size == (12, 10), 'sprite over the cell line was cut'
+
+        flat = os.path.join(d, 'flat.png')
+        clear = Image.new('RGBA', (4, 4), (0, 0, 0, 0))
+        clear.putpixel((1, 1), (10, 20, 30, 255))
+        clear.save(flat)
+        F.flatten(flat, 'ff00ff')
+        im = Image.open(flat)
+        assert im.mode == 'RGB' and im.getpixel((0, 0)) == (255, 0, 255) and im.getpixel((1, 1)) == (10, 20, 30)
         print('forge helpers: ok')
     finally:
         shutil.rmtree(d, ignore_errors=True)

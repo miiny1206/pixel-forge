@@ -200,6 +200,13 @@ python -m pxf_pipeline animate out/panda/panda_2.png out/panda-wave \
 python -m pxf_pipeline edit out/panda/panda_2.png out/panda-blue.png \
     --prompt "make the red robe deep indigo blue, keep the gold trim" --palette 1c2f5a,2b4a8a,3d6bc0
 
+# a whole set in ONE picture, so it shares one hand and one palette: icons, items, tiles.
+# One item per line in a file (or "|"-separated), each optionally name=description
+python -m pxf_pipeline create out/icons --items icons.txt --size 32x32 --palette sweetie16 \
+    --prompt "menu icons for a cosy fantasy game"
+# redo the pixel steps on what was already generated, at another size or palette, no new call
+python -m pxf_pipeline create out/icons --items icons.txt --size 24x24 --reuse
+
 python -m pxf_pipeline bundle my/frames --fps 10 --zoom 6   # any PNG frames -> sheet + GIF/WebP
 python -m pxf_pipeline palettes                             # the preset palettes
 ```
@@ -207,6 +214,7 @@ python -m pxf_pipeline palettes                             # the preset palette
 | command | what comes back |
 |---|---|
 | `create` | `NAME.png` at exactly WxH with transparency, `raw/` (model picture, snapped grid, ×8 preview), `NAME_variants.png` when `--variants` > 1 |
+| `create --items` | one `NAME.png` per item at WxH, `set_contact.png`, `raw/set.png` |
 | `animate` | `frames/00.png …` all the same size, `sheet.png` (horizontal strip) + `sheet.json` (frame size, count, fps), `anim.gif`, `anim.webp`, `anim@8x.gif/.webp`, `work/` (the sheet sent and the answer) |
 | `edit` | the edited PNG at the input's size, `*_work/` |
 
@@ -216,7 +224,11 @@ How each one keeps the result pixel art:
   from the palette, recovers the grid the model actually drew (`pxf snap`), keys that
   background out everywhere (holes included), trims, centres and fits the art into WxH by
   majority vote (never averaging, never enlarging), then maps it onto `--palette` or
-  reduces it to `--colors` without dithering.
+  reduces it to `--colors` without dithering. A model that answers on a transparent
+  background instead is put on the same flat colour first.
+- **create --items** asks for the set as a grid of cells in one picture, reduces the colours
+  of the whole set together, then gives each sprite to the cell its centre of mass falls
+  in, so a sprite that pokes over a cell line stays whole.
 - **animate** lays the sprite out N times on one 1024² sheet at a scale it chose and asks
   for all frames in one request, so they are drawn together as one design; the frames are
   voted back onto the known grid and the sprite's palette (plus `--palette`). Frame 1 is

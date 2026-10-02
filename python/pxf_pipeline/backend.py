@@ -180,7 +180,9 @@ def generate(dst, prompt, engine='images', model=None, size='1024x1024'):
         json.dump(meta, open(os.path.splitext(dst)[0] + '.error.json', 'w'), indent=1)
         raise SystemExit('no image returned: %s' % json.dumps(meta)[:400])
     from PIL import Image
-    Image.open(io.BytesIO(img)).convert('RGB').save(dst, 'PNG')
+    # kept with its alpha: an images model may answer on a transparent background whatever
+    # background colour was asked for, and flattening here would turn that into black
+    Image.open(io.BytesIO(img)).convert('RGBA').save(dst, 'PNG')
     json.dump(meta, open(os.path.splitext(dst)[0] + '.meta.json', 'w'), indent=1)
     return len(img), meta['seconds']
 

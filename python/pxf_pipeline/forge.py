@@ -2,7 +2,9 @@
 
     python -m pxf_pipeline create  <outdir> --prompt TEXT [--size WxH] [--variants K]
                                    [--palette SPEC | --colors N] [--style TEXT]
-                                   [--name NAME] [--engine images|chat] [--model M]
+                                   [--name NAME] [--engine images|chat] [--model M] [--reuse]
+    python -m pxf_pipeline create  <outdir> --items "name=what|name=what|..."|items.txt
+                                   [--prompt THEME] [--size WxH] [--palette SPEC | --colors N] ...
     python -m pxf_pipeline animate <sprite.png> <outdir> --prompt TEXT --frames N
                                    [--rows R] [--pad N|L,T,R,B] [--palette SPEC]
                                    [--fps F] [--redraw-first] [--min-region N]
@@ -16,6 +18,11 @@
 create   draws a new sprite from text. The model's picture is snapped back onto the grid it
          actually drew (`pxf snap`), the flat background is keyed out, the art is fitted
          into WxH and put on a palette. --variants draws K candidates side by side.
+         With --items it draws a whole set (icons, items, tiles) in one picture, so the
+         set shares one style and one palette; one item per line in a file, or
+         `|`-separated, each optionally `name=description`; --prompt is then the theme.
+         --reuse redoes the pixel steps on the pictures already in raw/ without asking
+         the model again (another size, palette or colour count).
 animate  turns one finished sprite into N frames of the same canvas. The sprite is laid
          out N times on one sheet at a known scale and the model redraws the copies in a
          single request, so every frame is drawn together and stays one design; the grid
@@ -118,6 +125,17 @@ def key_out(im, bg, tol=110):
     bgc = hexrgb(bg)
     im.putdata([(0, 0, 0, 0) if p[3] < 128 or dist(p, bgc) < tol else p[:3] + (255,) for p in pixels(im)])
     return im
+
+
+def flatten(path, bg):
+    """the generated picture on the background colour it was asked for, in place: a model
+    that answered with transparency instead gets the same flat background `pxf snap` keys"""
+    im = Image.open(path)
+    if im.mode in ('RGBA', 'LA', 'P'):
+        im = im.convert('RGBA')
+        out = Image.new('RGBA', im.size, hexrgb(bg) + (255,))
+        out.alpha_composite(im)
+        out.convert('RGB').save(path)
 
 
 def to_palette(im, pal):
@@ -324,8 +342,16 @@ def contact(images, path, zoom=6, gap=8):
 
 # --- commands -----------------------------------------------------------------------------
 
+def _generate(src, text, engine, model, reuse):
+    if reuse and os.path.isfile(src):
+        print('%s: reusing the picture already generated' % src)
+        return
+    _, secs = backend.generate(src, text, engine, model)
+    print('%s: generated in %.0fs' % (src, secs))
+
+
 def create(outdir, prompt, dims=(32, 32), variants=1, pal_spec=None, colours=16, style=None,
-           name='sprite', engine='images', model=None):
+           name='sprite', engine='images', model=None, reuse=False):
     pal = palette(pal_spec)
     bg, bgname = pick_background(pal)
     w, h = dims
@@ -337,8 +363,8 @@ def create(outdir, prompt, dims=(32, 32), variants=1, pal_spec=None, colours=16,
     for i in range(1, variants + 1):
         tag = '%s_%d' % (name, i) if variants > 1 else name
         src = os.path.join(raw, tag + '.png')
-        n, s = backend.generate(src, text, engine, model)
-        print('%s: generated in %.0fs' % (tag, s))
+        _generate(src, text, engine, model, reuse)
+        flatten(src, bg)
         snapdir = os.path.join(raw, 'snap')
         pxfbin.run('snap', pxfbin.path(src), pxfbin.path(snapdir), '--flatten', bg, '--colors', 48)
         art = key_out(Image.open(os.path.join(snapdir, tag + '.png')), bg)
@@ -351,6 +377,88 @@ def create(outdir, prompt, dims=(32, 32), variants=1, pal_spec=None, colours=16,
         done.append(art)
     if variants > 1:
         contact(done, os.path.join(outdir, name + '_variants.png'))
+    return done
+
+
+def components(im):
+    """the 8-connected opaque blobs of `im`, each a list of (x, y)"""
+    w, h = im.size
+    a = im.getchannel('A').load()
+    seen, out = set(), []
+    for y in range(h):
+        for x in range(w):
+            if a[x, y] < 128 or (x, y) in seen:
+                continue
+            blob, todo = [], [(x, y)]
+            seen.add((x, y))
+            while todo:
+                cx, cy = todo.pop()
+                blob.append((cx, cy))
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        nx, ny = cx + dx, cy + dy
+                        if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in seen and a[nx, ny] >= 128:
+                            seen.add((nx, ny))
+                            todo.append((nx, ny))
+            out.append(blob)
+    return out
+
+
+def split_cells(im, rows, cols):
+    """one image per cell of a rows x cols layout. Each blob goes to the cell its centre of
+    mass falls in, so a sprite that pokes over its cell line stays whole."""
+    w, h = im.size
+    src = im.load()
+    cells = [Image.new('RGBA', im.size, (0, 0, 0, 0)) for _ in range(rows * cols)]
+    for blob in components(im):
+        cx = sum(x for x, _ in blob) / len(blob)
+        cy = sum(y for _, y in blob) / len(blob)
+        cell = cells[min(int(cy * rows / h), rows - 1) * cols + min(int(cx * cols / w), cols - 1)]
+        dst = cell.load()
+        for x, y in blob:
+            dst[x, y] = src[x, y]
+    return cells
+
+
+def create_set(outdir, items, dims=(32, 32), names=None, pal_spec=None, colours=16, style=None,
+               engine='images', model=None, theme=None, reuse=False):
+    """several sprites drawn together in ONE picture, so they share one hand, outline weight
+    and palette: an icon set, a family of items, a tile set"""
+    pal = palette(pal_spec)
+    bg, bgname = pick_background(pal)
+    w, h = dims
+    n = len(items)
+    cols = math.ceil(math.sqrt(n))
+    rows = math.ceil(n / cols)
+    names = names or ['%02d' % (i + 1) for i in range(n)]
+    listing = ' '.join('Cell %d: %s.' % (i + 1, t.rstrip('. ')) for i, t in enumerate(items))
+    text = ('A set of %d separate pixel-art sprites%s laid out in a grid of %d rows and %d columns of '
+            'equal cells, read left to right, top to bottom, every sprite centred in its own cell '
+            'with empty space between them, all drawn in exactly the same style, scale and palette. '
+            '%s Leave any extra cells empty. %s Each sprite roughly %dx%d pixels. Perfectly flat '
+            'solid %s (#%s) background.' % (n, ' (%s)' % theme if theme else '', rows, cols, listing,
+                                            style or STYLE, w, h, bgname, bg))
+    raw = os.path.join(outdir, 'raw')
+    os.makedirs(raw, exist_ok=True)
+    src = os.path.join(raw, 'set.png')
+    _generate(src, text, engine, model, reuse)
+    flatten(src, bg)
+    snapdir = os.path.join(raw, 'snap')
+    pxfbin.run('snap', pxfbin.path(src), pxfbin.path(snapdir), '--flatten', bg, '--colors', 64)
+    sheet = key_out(Image.open(os.path.join(snapdir, 'set.png')), bg)
+    # one colour reduction over the whole set, not per sprite: the set keeps one palette
+    sheet = to_palette(sheet, pal) if pal else reduce_colours(sheet, colours)
+    done = []
+    for name, cell in zip(names, split_cells(sheet, rows, cols)):
+        if not cell.getchannel('A').getbbox():
+            print('%s: the model left its cell empty' % name)
+            continue
+        art = fit(cell, w, h)
+        art.save(os.path.join(outdir, name + '.png'))
+        done.append(art)
+    contact(done, os.path.join(outdir, 'set_contact.png'))
+    print('%s: %d sprites %dx%d, %d colours' % (outdir, len(done), w, h,
+                                               len({c for a in done for c in colours_of(a)})))
     return done
 
 
@@ -439,7 +547,7 @@ def main(command, argv=None):
     i = 0
     while i < len(argv):
         if argv[i].startswith('--'):
-            i += 1 if argv[i] in ('--redraw-first',) else 2
+            i += 1 if argv[i] in ('--redraw-first', '--reuse') else 2
         else:
             pos.append(argv[i])
             i += 1
@@ -451,10 +559,25 @@ def main(command, argv=None):
         print(bundle(pos[0], _opt(argv, '--fps', 8, float), _opt(argv, '--zoom', 8, int), _opt(argv, '--out')))
         return
     prompt = _opt(argv, '--prompt')
+    items = _opt(argv, '--items')
+    if command == 'create' and pos and items:
+        if os.path.isfile(items):
+            items = [l.strip() for l in open(items, encoding='utf-8') if l.strip() and not l.startswith('#')]
+        else:
+            items = [t.strip() for t in items.split('|') if t.strip()]
+        named = [t.partition('=') for t in items]
+        names = [k.strip() if sep else None for k, sep, _ in named]
+        items = [v.strip() if sep else k.strip() for k, sep, v in named]
+        names = [nm or '%02d' % (i + 1) for i, nm in enumerate(names)]
+        create_set(pos[0], items, size(_opt(argv, '--size', '32x32')), names, _opt(argv, '--palette'),
+                   _opt(argv, '--colors', 16, int), _opt(argv, '--style'), _opt(argv, '--engine', 'images'),
+                   _opt(argv, '--model'), prompt, '--reuse' in argv)
+        return
     if command == 'create' and pos and prompt:
         create(pos[0], prompt, size(_opt(argv, '--size', '32x32')), _opt(argv, '--variants', 1, int),
                _opt(argv, '--palette'), _opt(argv, '--colors', 16, int), _opt(argv, '--style'),
-               _opt(argv, '--name', 'sprite'), _opt(argv, '--engine', 'images'), _opt(argv, '--model'))
+               _opt(argv, '--name', 'sprite'), _opt(argv, '--engine', 'images'), _opt(argv, '--model'),
+               '--reuse' in argv)
         return
     if command == 'animate' and len(pos) >= 2 and prompt and '--frames' in argv:
         animate(pos[0], pos[1], prompt, _opt(argv, '--frames', cast=int), _opt(argv, '--rows', None, int),
