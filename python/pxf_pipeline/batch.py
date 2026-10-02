@@ -29,6 +29,7 @@ import json, os, shutil, subprocess, sys, time
 
 from .project import current
 from . import crops as EX, leftover as LO, pxfbin
+from .sheetio import pixels
 
 PKG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOWNSCALE = ['--tol', '24', '--resolve', '--grain', '--register', '--metric', 'redmean']
@@ -76,7 +77,7 @@ def colour_map(a, b):
     A, B = Image.open(P.stock(a)).convert('RGBA'), Image.open(P.stock(b)).convert('RGBA')
     if A.size != B.size:
         return None
-    pa, pb = list(A.getdata()), list(B.getdata())
+    pa, pb = pixels(A), pixels(B)
     votes, opaque = {}, 0
     for p, q in zip(pa, pb):
         if (p[3] >= 128) != (q[3] >= 128):
@@ -117,7 +118,7 @@ def recolour(src, dst, cm):
     from PIL import Image
     cmap, fix = cm
     im = Image.open(src).convert('RGBA')
-    px = [cmap.get(p[:3], p[:3]) + (p[3],) for p in im.getdata()]
+    px = [cmap.get(p[:3], p[:3]) + (p[3],) for p in pixels(im)]
     for i, q in fix.items():
         px[i] = q
     im.putdata(px)

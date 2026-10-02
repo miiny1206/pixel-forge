@@ -12,6 +12,7 @@ import sys
 from PIL import Image
 
 from .project import current
+from .sheetio import pixels
 
 LINE = 0.3
 
@@ -19,9 +20,9 @@ LINE = 0.3
 def score(path, f, mask_path):
     P = current()
     B = P.crops()
-    a = list(Image.open(path).convert('RGBA').getdata())
-    s = list(Image.open(P.stock(f)).convert('RGBA').getdata())
-    m = list(Image.open(mask_path).convert('L').getdata())
+    a = pixels(Image.open(path).convert('RGBA'))
+    s = pixels(Image.open(P.stock(f)).convert('RGBA'))
+    m = pixels(Image.open(mask_path).convert('L'))
     w = Image.open(path).width
     line = B[str(f)][1] + int(LINE * B[str(f)][3])
     n = t = 0

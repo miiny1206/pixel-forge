@@ -112,12 +112,18 @@ def to_image(fr):
     return im
 
 
+def pixels(im):
+    """the pixels as a flat list of tuples (newer Pillow deprecates `getdata`)"""
+    get = getattr(im, 'get_flattened_data', None)
+    return list(get() if get else im.getdata())
+
+
 def from_image(im):
     """RGBA image -> (w, h, px); an opaque pixel that would land on the key is moved one
     blue step off it, so it cannot become a hole in game"""
     im = im.convert('RGBA')
     out = []
-    for r, g, b, a in im.getdata():
+    for r, g, b, a in pixels(im):
         v = KEY if a < 128 else to565(r, g, b)
         out.append(v ^ 1 if a >= 128 and v == KEY else v)
     return im.size[0], im.size[1], tuple(out)

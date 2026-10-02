@@ -3,6 +3,8 @@
     python -m pxf_pipeline.backend chat   <in.png> <out.png> --prompt-file p.txt [--model M] [--ref r.png ...]
     python -m pxf_pipeline.backend images <in.png> <out.png> --prompt-file p.txt [--model M] [--ref r.png ...] [--mask m.png]
 
+`generate` makes a new image from text only (no input image); `create` in forge.py builds on it.
+
 Configuration (environment or .env, never printed):
 
     PXF_API_BASE          base URL of the endpoint, e.g. https://api.example.com (no /v1)
@@ -29,6 +31,15 @@ message says so and the raw answer, image bytes cut out, is kept next to the out
 import base64, io, json, os, re, sys, time, urllib.error, urllib.request, uuid
 
 from . import env
+
+try:
+    # The OS certificate store, as curl uses: a gateway whose chain ended on a cross-signed
+    # Let's Encrypt root passed curl and `openssl s_client` but failed every Python CA-file
+    # setup tried, including certifi and the exported macOS roots.
+    import truststore
+    truststore.inject_into_ssl()
+except ImportError:
+    pass
 
 
 def _endpoint(path):
@@ -138,6 +149,38 @@ def images(src, dst, prompt, model=None, refs=(), mask=None, size='1024x1024'):
     meta = {k: v for k, v in d.items() if k != 'data'}
     meta.update(item_keys=sorted(item), revised_prompt=item.get('revised_prompt'), model=model,
                 refs=list(refs), seconds=round(time.time() - t, 1))
+    json.dump(meta, open(os.path.splitext(dst)[0] + '.meta.json', 'w'), indent=1)
+    return len(img), meta['seconds']
+
+
+def generate(dst, prompt, engine='images', model=None, size='1024x1024'):
+    """A new image from text alone: `images` posts to /v1/images/generations, `chat` asks a
+    chat image model with no input image. Same refusal and meta handling as the edits."""
+    t = time.time()
+    if engine == 'chat':
+        model = model or env.get('PXF_CHAT_IMAGE_MODEL', required=True)
+        body = json.dumps({'model': model, 'modalities': ['image', 'text'],
+                           'messages': [{'role': 'user', 'content': prompt}]}).encode()
+        d = json.loads(_post(_endpoint('/v1/chat/completions'), body, 'application/json'))
+        img = find_image(d)
+    else:
+        model = model or env.get('PXF_IMAGE_MODEL', required=True)
+        body = json.dumps({'model': model, 'prompt': prompt, 'n': 1, 'size': size}).encode()
+        d = json.loads(_post(_endpoint('/v1/images/generations'), body, 'application/json'))
+        item = (d.get('data') or [{}])[0]
+        if item.get('b64_json'):
+            img = base64.b64decode(item['b64_json'])
+        elif item.get('url'):
+            img = urllib.request.urlopen(item['url'], timeout=120).read()
+        else:
+            img = None
+    meta = strip(d)
+    meta.update(model=model, engine=engine, prompt=prompt, seconds=round(time.time() - t, 1))
+    if not img:
+        json.dump(meta, open(os.path.splitext(dst)[0] + '.error.json', 'w'), indent=1)
+        raise SystemExit('no image returned: %s' % json.dumps(meta)[:400])
+    from PIL import Image
+    Image.open(io.BytesIO(img)).convert('RGB').save(dst, 'PNG')
     json.dump(meta, open(os.path.splitext(dst)[0] + '.meta.json', 'w'), indent=1)
     return len(img), meta['seconds']
 

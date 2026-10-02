@@ -6,8 +6,9 @@ Builds a tiny .spr and .ani in code, then checks:
   - sheetio reads and writes them back byte for byte, and the TEA-sealed name survives a rename
   - grow.py pads a frame and moves its .ani steps so it lands on the same screen pixels
   - if a pxf binary is found: `pxf info`, and import -> export reproduces the .spr exactly
+  - the create / animate / edit helpers: palettes, keying, fitting, stabilize, lock, bundle
 """
-import os, shutil, struct, sys, tempfile
+import json, os, shutil, struct, sys, tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'python'))
@@ -137,7 +138,65 @@ def png_frames():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def forge():
+    """the single-sprite helpers behind create / animate / edit, without a model"""
+    from PIL import Image
+    from pxf_pipeline import forge as F
+    assert len(F.palette('pico8')) == 16 and F.palette('#ff0000, 00ff00') == [(255, 0, 0), (0, 255, 0)]
+    d = tempfile.mkdtemp(prefix='pxf_forge_', dir=os.environ.get('PXF_TMP') or None)
+    try:
+        gpl = os.path.join(d, 'p.gpl')
+        open(gpl, 'w').write('GIMP Palette\nName: t\n#\n 10  20  30\tdark\n255 255 255\twhite\n')
+        assert F.palette(gpl) == [(10, 20, 30), (255, 255, 255)], F.palette(gpl)
+
+        # a red sprite on the background the model was asked for, with a hole in the middle
+        assert F.pick_background([(255, 0, 255)])[0] != 'ff00ff', 'background must avoid the palette'
+        im = Image.new('RGB', (20, 20), (250, 6, 248))
+        im.paste((200, 30, 30), (4, 4, 16, 16))
+        im.paste((255, 0, 255), (9, 9, 11, 11))
+        art = F.key_out(im, 'ff00ff')
+        assert art.getpixel((0, 0))[3] == 0 and art.getpixel((10, 10))[3] == 0, 'background left'
+        assert art.getpixel((5, 5)) == (200, 30, 30, 255)
+
+        fitted = F.fit(art, 8, 8)
+        assert fitted.size == (8, 8) and F.colours_of(fitted) == [(200, 30, 30)], 'shrink added colours'
+        small = F.fit(art, 32, 32)
+        assert F.trim(small).size == (12, 12), 'fit must not enlarge'
+
+        many = Image.new('RGBA', (8, 1))
+        many.putdata([(i * 30, 255 - i * 30, 7, 255) for i in range(8)])
+        assert len(F.colours_of(F.reduce_colours(many, 3))) <= 3
+
+        base = Image.new('RGBA', (16, 16), (0, 0, 0, 0))
+        base.paste((40, 40, 40, 255), (2, 2, 14, 14))
+        frame = base.copy()
+        frame.putpixel((3, 3), (240, 240, 240, 255))           # a speck of redraw noise
+        frame.paste((240, 200, 0, 255), (6, 6, 10, 10))         # real motion: a 4x4 patch
+        st = F.stabilize(frame, base, min_region=8)
+        assert st.getpixel((3, 3)) == base.getpixel((3, 3)), 'speck not reverted'
+        assert st.getpixel((7, 7)) == (240, 200, 0, 255), 'real motion reverted'
+        assert F.lock(st, base, F.boxes('6,6,2,2')).getpixel((7, 7)) == base.getpixel((7, 7))
+        assert F.lock(st, base, F.boxes('6,6,2,2')).getpixel((9, 9)) == (240, 200, 0, 255)
+        assert F.pad(base, '1,2,3,4').size == (20, 22)
+
+        fd = os.path.join(d, 'frames')
+        os.makedirs(fd)
+        base.save(os.path.join(fd, '00.png'))
+        st.crop((0, 2, 16, 16)).save(os.path.join(fd, '01.png'))   # a shorter frame
+        F.bundle(fd, fps=4, zoom=2)
+        meta = json.load(open(os.path.join(fd, 'sheet.json')))
+        assert (meta['frame_width'], meta['frame_height'], meta['frames']) == (16, 16, 2), meta
+        assert Image.open(os.path.join(fd, 'sheet.png')).size == (32, 16)
+        g = Image.open(os.path.join(fd, 'anim@2x.gif'))
+        assert g.n_frames == 2 and g.size == (32, 32)
+        assert Image.open(os.path.join(fd, 'anim.webp')).n_frames == 2
+        print('forge helpers: ok')
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 if __name__ == '__main__':
     main()
     png_frames()
+    forge()
     print('smoke test passed')

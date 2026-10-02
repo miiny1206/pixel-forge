@@ -16,8 +16,9 @@ pixel-forge wraps an image model in deterministic tools that fix exactly those t
   original frames did not change, the new pixels are carried over from the previous
   finished frame instead of being redrawn, so only real motion changes.
 
-Use it to put a new outfit on a character, recolour or restyle a sprite set, or redraw
-details across a whole animation — with any OpenAI-compatible image endpoint.
+Use it to draw a new sprite from a sentence, animate a finished sprite on a fixed canvas,
+put a new outfit on a character, recolour or restyle a sprite set, or redraw details across
+a whole animation — with any OpenAI-compatible image endpoint.
 
 ![original frames (top) and redrawn frames (bottom): same grid, palette, canvases and poses](docs/compare.png)
 
@@ -49,15 +50,16 @@ and measured.
 1. [Why not just ask the model?](#why-not-just-ask-the-model)
 2. [Install](#install)
 3. [Configuration](#configuration)
-4. [Workflow](#workflow)
-5. [The pipeline, step by step](#the-pipeline-step-by-step)
-6. [`pxf` command reference](#pxf-command-reference)
-7. [Game formats (optional)](#game-formats-optional)
-8. [Case study: a beach costume](#case-study-a-beach-costume)
-9. [Refusals and moderation](#refusals-and-moderation)
-10. [LoRA / fine-tuning](#lora--fine-tuning)
-11. [Limitations](#limitations)
-12. [License](#license)
+4. [Single sprites: create, animate, edit](#single-sprites-create-animate-edit)
+5. [Workflow](#workflow)
+6. [The pipeline, step by step](#the-pipeline-step-by-step)
+7. [`pxf` command reference](#pxf-command-reference)
+8. [Game formats (optional)](#game-formats-optional)
+9. [Case study: a beach costume](#case-study-a-beach-costume)
+10. [Refusals and moderation](#refusals-and-moderation)
+11. [LoRA / fine-tuning](#lora--fine-tuning)
+12. [Limitations](#limitations)
+13. [License](#license)
 
 ---
 
@@ -136,11 +138,15 @@ Copy `.env.example` to `.env` (next to your `project.json` or in the working dir
 |---|---|
 | `PXF_API_BASE` | OpenAI-compatible base URL, without `/v1` |
 | `PXF_API_KEY` | bearer token |
-| `PXF_IMAGE_MODEL` | model for the `images` engine — `POST /v1/images/edits` (multipart) |
+| `PXF_IMAGE_MODEL` | model for the `images` engine — `POST /v1/images/edits` (multipart); `create` uses `POST /v1/images/generations` |
 | `PXF_CHAT_IMAGE_MODEL` | model for the `chat` engine — `POST /v1/chat/completions` with `"modalities": ["image","text"]` |
 | `PXF_ENGINE` | optional override of the project's `engine` |
 | `PXF_BIN` | optional path to `pxf` |
 | `ASEPRITE` | optional path to Aseprite |
+
+Certificates: the backend uses the OS trust store through
+[truststore](https://pypi.org/project/truststore/) when it is installed (it is a dependency
+of `python/`), so an endpoint that `curl` accepts is accepted here too.
 
 Two request styles exist because they behave differently (see the table above): an
 image-edit model handles a multi-frame sheet and an optional reference image; a chat image
@@ -173,6 +179,63 @@ full: [`examples/beach-costume/project.json`](examples/beach-costume/project.jso
 | `hold`, `grow` | see [hold and grow](#7-hold-and-grow) |
 
 The project is found from `--project FILE`, else `PXF_PROJECT`, else `./project.json`.
+
+---
+
+## Single sprites: create, animate, edit
+
+No `project.json` needed: these commands work on one sprite or one animation.
+
+```sh
+# a new 48x48 sprite from text, 3 candidates side by side, on a preset palette
+python -m pxf_pipeline create out/panda --prompt "a chubby panda scholar in a red robe holding a brush" \
+    --size 48x48 --variants 3 --name panda          # or --palette sweetie16 / --colors 12
+
+# that sprite as a 6-frame loop on the same canvas; 4 px of room above for the motion,
+# the face copied from frame 1 into every frame
+python -m pxf_pipeline animate out/panda/panda_2.png out/panda-wave \
+    --prompt "waves its right paw up and down" --frames 6 --pad 4,4,4,0 --lock 12,12,24,16 --fps 8
+
+# one change, same canvas and grid; new colours must be allowed through --palette
+python -m pxf_pipeline edit out/panda/panda_2.png out/panda-blue.png \
+    --prompt "make the red robe deep indigo blue, keep the gold trim" --palette 1c2f5a,2b4a8a,3d6bc0
+
+python -m pxf_pipeline bundle my/frames --fps 10 --zoom 6   # any PNG frames -> sheet + GIF/WebP
+python -m pxf_pipeline palettes                             # the preset palettes
+```
+
+| command | what comes back |
+|---|---|
+| `create` | `NAME.png` at exactly WxH with transparency, `raw/` (model picture, snapped grid, ×8 preview), `NAME_variants.png` when `--variants` > 1 |
+| `animate` | `frames/00.png …` all the same size, `sheet.png` (horizontal strip) + `sheet.json` (frame size, count, fps), `anim.gif`, `anim.webp`, `anim@8x.gif/.webp`, `work/` (the sheet sent and the answer) |
+| `edit` | the edited PNG at the input's size, `*_work/` |
+
+How each one keeps the result pixel art:
+
+- **create** asks for the subject on a flat background colour picked as far as possible
+  from the palette, recovers the grid the model actually drew (`pxf snap`), keys that
+  background out everywhere (holes included), trims, centres and fits the art into WxH by
+  majority vote (never averaging, never enlarging), then maps it onto `--palette` or
+  reduces it to `--colors` without dithering.
+- **animate** lays the sprite out N times on one 1024² sheet at a scale it chose and asks
+  for all frames in one request, so they are drawn together as one design; the frames are
+  voted back onto the known grid and the sprite's palette (plus `--palette`). Frame 1 is
+  the input pixel for pixel (`--redraw-first` to let the model touch it). Differences from
+  the input that form patches smaller than `--min-region` pixels (default 8) are redraw
+  noise and are put back, so the loop does not shimmer; `--lock x,y,w,h;…` copies whole
+  boxes (a face, a held prop) from the input into every frame. `--pad` grows the canvas
+  first for motion that leaves the sprite's box.
+- **edit** is animate with one cell and no fixed frame: the same grid, palette, cleanup
+  and `--lock`.
+
+`--palette` takes a preset (`pico8`, `sweetie16`, `gameboy`), comma-separated hex, a
+`.hex`/`.txt` file, a GIMP `.gpl`, or PNGs (a file or a folder) whose colours are the
+palette. For a set of sprites that must match, create the first one, then pass it (or the
+folder of finished sprites) as `--palette` to the next.
+
+Large redraws still drift: in an animation the model may redraw the whole body a pixel
+off. Lock what must not move, keep N small (4–8), and check `work/answer.png` when a frame
+looks wrong.
 
 ---
 
