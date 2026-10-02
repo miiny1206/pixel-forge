@@ -1,5 +1,7 @@
 # build
 /target/
+.venv/
+uv.lock
 __pycache__/
 *.pyc
 *.egg-info/

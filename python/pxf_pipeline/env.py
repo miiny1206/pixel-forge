@@ -1,10 +1,11 @@
 """Settings from the environment, with an optional `.env` file.
 
-A `.env` next to the project file, in the current directory, or named by PXF_ENV_FILE is
-read once; variables already set in the environment win. Values are never printed.
+A `.env` named by PXF_ENV_FILE, next to the project file, in the current directory, or at
+the repository root (so an installed `pixel-forge` works from any directory) is read once; variables already set in the environment win. Values are never printed.
 """
 import os
 
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _loaded = False
 
 
@@ -25,7 +26,7 @@ def load(extra_dirs=()):
     if _loaded:
         return
     _loaded = True
-    cands = [os.environ.get('PXF_ENV_FILE')] + [os.path.join(d, '.env') for d in extra_dirs] + ['.env']
+    cands = [os.environ.get('PXF_ENV_FILE')] + [os.path.join(d, '.env') for d in extra_dirs] + ['.env', os.path.join(REPO, '.env')]
     for p in cands:
         if p and os.path.isfile(p):
             _read(p)

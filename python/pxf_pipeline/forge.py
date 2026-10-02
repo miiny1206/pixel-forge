@@ -12,6 +12,8 @@
     python -m pxf_pipeline edit    <sprite.png> <out.png> --prompt TEXT
                                    [--palette SPEC] [--min-region N] [--lock x,y,w,h[;...]]
                                    [--model M]
+    python -m pxf_pipeline pixelize <picture.png> <out.png> [--size WxH] [--palette SPEC | --colors N]
+                                   [--bg RRGGBB]
     python -m pxf_pipeline bundle  <framedir> [--fps F] [--zoom K] [--out DIR]
     python -m pxf_pipeline palettes
 
@@ -33,6 +35,10 @@ animate  turns one finished sprite into N frames of the same canvas. The sprite 
          only real motion moves; 0 keeps everything the model drew. --lock copies the
          given boxes (sprite pixels, after --pad) from the input into every frame.
 edit     one sprite, one change, same canvas, back on the sprite's own grid.
+pixelize the pixel steps of create on a picture you already have (another generator's
+         render, a soft upscale): snapped to the grid it was drawn on, the flat background
+         (--bg, else the border colour) keyed out, fitted into WxH if given, put on a palette.
+         Not for a sprite that is already one pixel per pixel: snap would read a grid in it.
 bundle   frames -> sheet.png + sheet.json (a horizontal strip), anim.gif, anim.webp and
          zoomed previews; animate and create call it on their output.
 
@@ -350,6 +356,45 @@ def _generate(src, text, engine, model, reuse):
     print('%s: generated in %.0fs' % (src, secs))
 
 
+def snap_art(src, bg, colours=48):
+    """a picture painted on the flat colour `bg`, in place on that colour, back on the grid it
+    was drawn on (`pxf snap`), the background keyed out"""
+    flatten(src, bg)
+    snapdir = os.path.join(os.path.dirname(src), 'snap')
+    pxfbin.run('snap', pxfbin.path(src), pxfbin.path(snapdir), '--flatten', bg, '--colors', colours)
+    return key_out(Image.open(os.path.join(snapdir, os.path.basename(src))), bg)
+
+
+def edge_colour(im):
+    """the most common colour on the picture's border: its background, for a flat one"""
+    w, h = im.size
+    px = im.load()
+    border = [px[x, y][:3] for x in range(w) for y in (0, h - 1)] + \
+             [px[x, y][:3] for y in range(h) for x in (0, w - 1)]
+    return tohex(max(set(border), key=border.count))
+
+
+def pixelize(src, dst, dims=None, pal_spec=None, colours=16, bg=None):
+    """any off-grid picture (another tool's render, a soft upscale) -> a sprite with the pixel
+    steps of create and no model call. The background is `bg`, else the border colour of an
+    opaque picture; a transparent one is keyed already."""
+    pal = palette(pal_spec)
+    im = Image.open(src).convert('RGBA')
+    if not bg:
+        bg = edge_colour(im) if im.getchannel('A').getextrema()[0] == 255 else pick_background(pal)[0]
+    work = os.path.splitext(dst)[0] + '_work'
+    os.makedirs(work, exist_ok=True)
+    raw = os.path.join(work, 'raw.png')
+    im.save(raw)
+    art = snap_art(raw, bg)
+    art = fit(art, *dims) if dims else trim(art)
+    art = to_palette(art, pal) if pal else reduce_colours(art, colours)
+    art.save(dst)
+    zoomed(art, 8).save(os.path.join(work, 'preview@8x.png'))
+    print('%s: %dx%d, %d colours' % (dst, art.width, art.height, len(colours_of(art))))
+    return art
+
+
 def create(outdir, prompt, dims=(32, 32), variants=1, pal_spec=None, colours=16, style=None,
            name='sprite', engine='images', model=None, reuse=False):
     pal = palette(pal_spec)
@@ -364,11 +409,7 @@ def create(outdir, prompt, dims=(32, 32), variants=1, pal_spec=None, colours=16,
         tag = '%s_%d' % (name, i) if variants > 1 else name
         src = os.path.join(raw, tag + '.png')
         _generate(src, text, engine, model, reuse)
-        flatten(src, bg)
-        snapdir = os.path.join(raw, 'snap')
-        pxfbin.run('snap', pxfbin.path(src), pxfbin.path(snapdir), '--flatten', bg, '--colors', 48)
-        art = key_out(Image.open(os.path.join(snapdir, tag + '.png')), bg)
-        art = fit(art, w, h)
+        art = fit(snap_art(src, bg), w, h)
         art = to_palette(art, pal) if pal else reduce_colours(art, colours)
         dst = os.path.join(outdir, tag + '.png')
         art.save(dst)
@@ -442,10 +483,7 @@ def create_set(outdir, items, dims=(32, 32), names=None, pal_spec=None, colours=
     os.makedirs(raw, exist_ok=True)
     src = os.path.join(raw, 'set.png')
     _generate(src, text, engine, model, reuse)
-    flatten(src, bg)
-    snapdir = os.path.join(raw, 'snap')
-    pxfbin.run('snap', pxfbin.path(src), pxfbin.path(snapdir), '--flatten', bg, '--colors', 64)
-    sheet = key_out(Image.open(os.path.join(snapdir, 'set.png')), bg)
+    sheet = snap_art(src, bg, 64)
     # one colour reduction over the whole set, not per sprite: the set keeps one palette
     sheet = to_palette(sheet, pal) if pal else reduce_colours(sheet, colours)
     done = []
@@ -584,6 +622,11 @@ def main(command, argv=None):
                 _opt(argv, '--pad'), _opt(argv, '--palette'), _opt(argv, '--fps', 8, float),
                 '--redraw-first' not in argv, _opt(argv, '--model'), _opt(argv, '--min-region', 8, int),
                 _opt(argv, '--lock'))
+        return
+    if command == 'pixelize' and len(pos) >= 2:
+        dims = _opt(argv, '--size')
+        pixelize(pos[0], pos[1], size(dims) if dims else None, _opt(argv, '--palette'),
+                 _opt(argv, '--colors', 16, int), _opt(argv, '--bg'))
         return
     if command == 'edit' and len(pos) >= 2 and prompt:
         edit(pos[0], pos[1], prompt, _opt(argv, '--palette'), _opt(argv, '--model'),

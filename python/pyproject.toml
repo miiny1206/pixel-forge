@@ -10,8 +10,12 @@ license = {text = "MIT"}
 requires-python = ">=3.9"
 dependencies = ["Pillow>=9", "truststore>=0.9; python_version>='3.10'"]
 
+[project.optional-dependencies]
+mcp = ["mcp>=2.2; python_version>='3.10'"]
+
 [project.scripts]
 pxf-pipeline = "pxf_pipeline.__main__:main"
+pixel-forge = "pxf_pipeline.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["pxf_pipeline*"]
