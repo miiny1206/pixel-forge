@@ -17,6 +17,7 @@ projects (a folder of animations, see docs/pipeline.md):
   autorun <name>                  batch + finish across rate-limit windows
   smooth [anims]                  one drawing per animation
   transplant <run> <f>:<donor>    carry a finished frame onto a near-identical pose
+  graft <f>:<donor> [--stamp]     fill a frame from a finished one of the same pose
   hold                            show finished neighbours in place of refused frames
   review <anims> [--zoom N]       stock-vs-result QA sheets
   leftover <dir> <frames>         how much of the stock outfit survived
@@ -28,7 +29,7 @@ projects (a folder of animations, see docs/pipeline.md):
 """
 import importlib, sys
 
-COMMANDS = ['prepare', 'plan', 'batch', 'autorun', 'smooth', 'transplant', 'hold', 'review',
+COMMANDS = ['prepare', 'plan', 'batch', 'autorun', 'smooth', 'transplant', 'graft', 'hold', 'review',
             'leftover', 'crops', 'finish', 'export', 'backend', 'asebridge']
 
 

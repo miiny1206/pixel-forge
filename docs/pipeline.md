@@ -145,7 +145,17 @@ model's drawing used.
 ### 4. transplant / graft
 Fill a frame from a finished frame of nearly the same pose — no request. `transplant`
 takes the donor's pixel where the two original frames agree after alignment and reports the
-rest. (The example's `graft.py` adds stamping a whole figure.)
+rest.
+
+`graft <f>:<donor>` does the same for a refused frame, aligned on the two **figures** only
+(a moving aura or a second character cannot win the alignment) and limited to the donor's
+figure mask. `graft <f>:<donor> --stamp` puts the donor's whole finished figure in place of
+the target's: for a held pose where only an effect moves, but each frame was redrawn on its
+own and the body flickered — stamp one figure into every frame of the hold. In both modes,
+where the redraw removed something that covered an effect (a skirt over an aura), the hole
+is grown back in from the surrounding effect colours (`--no-fill` to keep it transparent).
+Output goes to `runs/graft/bake`; `finish` lets it win over the runs and `smooth` treats it
+as a fixed point.
 
 ### 5. review / leftover
 `review <anims>` writes original-above-result sheets for QA; `leftover` prints the old-outfit
@@ -249,7 +259,7 @@ character lives there, wired in through `project.json`:
 | `bossmask.py` | a finisher where the body finder grabs the boss |
 | `hooks.py` | `masks`; `keep_effects` (slash arcs and dotted effects behind her come back); `boss_backfill`; `no_sash` |
 | `cleanup.py`, `bounce.py` | specks and scraps where carried and drawn pixels meet; a chest bounce on the idle |
-| `graft.py` | frames the model refused, filled from a redrawn frame of the same pose |
+| `graft.py` | the generic `graft` plus this character's aura test and leftover-sash removal |
 | `beachfx.py`, `foam.py` | effect colours in her sheet turned sea-blue, with foam |
 | `swordfix.py` | models drew the sheathed sword as a glinting chain while she runs |
 | `trailfix.py` | a stocking-coloured leg-swing trail in the get-up kept from the original art |

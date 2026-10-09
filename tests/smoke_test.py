@@ -211,8 +211,48 @@ def forge():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def graft():
+    """graft / --stamp on a synthetic held pose: the donor's finished figure lands on the
+    target at the stock shift, and where the redraw removed cloth over an effect, the effect
+    grows back in"""
+    import json, subprocess
+    from PIL import Image
+    d = tempfile.mkdtemp(prefix='pxf_graft_', dir=os.environ.get('PXF_TMP') or None)
+    try:
+        os.makedirs(os.path.join(d, 'frames', 'hold'))
+        AURA, RED = (90, 40, 200, 255), (200, 40, 40, 255)
+        for i, x0 in enumerate((5, 7)):                   # same figure, 2 px further right
+            im = Image.new('RGBA', (20, 20), AURA)
+            im.paste(RED, (x0, 5, x0 + 6, 15))
+            im.save(os.path.join(d, 'frames', 'hold', '%02d.png' % i))
+        json.dump({'frames': 'frames'}, open(os.path.join(d, 'project.json'), 'w'))
+        env = dict(os.environ, PXF_PROJECT=os.path.join(d, 'project.json'),
+                   PYTHONPATH=os.path.join(ROOT, 'python'))
+        run = lambda *a: subprocess.run([sys.executable, '-m', 'pxf_pipeline'] + list(a),
+                                        check=True, env=env, stdout=subprocess.DEVNULL)
+        run('prepare')
+        w = os.path.join(d, 'work')
+        json.dump({'0': [5, 5, 6, 10], '1': [7, 5, 6, 10]}, open(os.path.join(w, 'crops.json'), 'w'))
+        os.makedirs(os.path.join(w, 'bake_all'))
+        fin = Image.new('RGBA', (20, 20), AURA)           # donor redrawn: green top, bottom gone
+        fin.paste((20, 200, 20, 255), (7, 5, 13, 10))
+        fin.paste((0, 0, 0, 0), (7, 10, 13, 15))
+        fin.save(os.path.join(w, 'bake_all', 'frame_001.png'))
+        for mode in ([], ['--stamp']):
+            run('graft', '0:1', *mode)
+            out = Image.open(os.path.join(w, 'runs', 'graft', 'bake', 'frame_000.png')).convert('RGBA')
+            assert out.getpixel((5, 5)) == (20, 200, 20, 255), (mode, out.getpixel((5, 5)))
+            assert out.getpixel((10, 9)) == (20, 200, 20, 255), mode
+            assert out.getpixel((7, 12)) == AURA, (mode, out.getpixel((7, 12)))   # hole refilled
+            assert out.getpixel((15, 8)) == AURA, mode
+        print('graft + stamp: ok')
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 if __name__ == '__main__':
     main()
     png_frames()
     forge()
+    graft()
     print('smoke test passed')
